@@ -25,7 +25,7 @@ def register_blueprints(app):
         print("mod name: " + name)
         mod = import_string(name)
         if hasattr(mod, "bp"):
-            app.register_blueprint(mod.bp, url_prefix="/login")
+            app.register_blueprint(mod.bp, url_prefix="/user")
 
     return None
 

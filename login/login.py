@@ -1,6 +1,7 @@
 from flask import request,Blueprint,g,redirect,url_for,\
     abort,render_template_string,flash,current_app, make_response
 from models import User
+from database import db_session
 from login.sms_handler import send_sms
 import json
 from login.constant import LOGIN_SUCCESS, LOGIN_FAIL, SMS_SUCCESS, REGISTER_SUCCESS, REGISTER_FAIL
@@ -20,7 +21,7 @@ def gen_session_id(digit_sign):
     r.setex(session_id, str(digit_sign), 86400)
     return session_id
 
-@bp.route("/", methods=["GET", "POST"])
+@bp.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == 'GET':
         rs=User.query.all()
@@ -73,12 +74,14 @@ def verify_code():
 def register():
     try:
         u = User(request.json)
-        u.save()
+        db_session.add(u)
+        db_session.commit()
 
         session_id = gen_session_id(u.user_name)
         resp = make_response(json.dumps(LOGIN_SUCCESS))
         resp.set_cookie('bpetid', session_id)
     except Exception as e:
+        print(e)
         return render_template_string(json.dumps(REGISTER_FAIL))
     return resp
 
