@@ -1,59 +1,84 @@
 from flask import request,Blueprint,g,redirect,url_for,\
-    abort,render_template_string,flash,current_app
-from database import db_session
+    abort,render_template_string,flash,current_app, make_response
 from models import User
 from login.sms_handler import send_sms
+import json
+from login.constant import LOGIN_SUCCESS, LOGIN_FAIL, SMS_SUCCESS, REGISTER_SUCCESS, REGISTER_FAIL
+import redis
+import random
+import hashlib
 
 bp = Blueprint("login", __name__)
 
-'''
-def connect_db():
-    rv = sqlite3.connect(current_app.config["DATABASE"])
-    rv.row_factory = sqlite3.Row
-    return rv
+pool = redis.ConnectionPool(host='localhost', port=6379, db=0)
+r = redis.Redis(connection_pool=pool)
 
-def init_db():
-    db = get_db()
-    with current_app.open_resource("schema.sql", mode="r") as f:
-        db.cursor().executescript(f.read())
-    db.commit()
+def gen_session_id(digit_sign):
+    m = hashlib.md5()
+    m.update((str(digit_sign) + str(random.randint(1, 100))).encode('utf-8'))
+    session_id = m.hexdigest()
+    r.setex(session_id, str(digit_sign), 86400)
+    return session_id
 
-def get_db():
-    if not hasattr(g, "sqlite_db"):
-        g.sqlite_db = connect_db()
-    return g.sqlite_db
-'''
-
-@bp.route("/", methods=["POST"])
+@bp.route("/", methods=["GET", "POST"])
 def login():
-    #1. put session id in redis
-    #2. put secret info in redis
-    #3.
-    rs=User.query.all()
-    print(str(rs))
-    #print(str([{entry["title"]:entry["text"]} for entry in entries]))
+    if request.method == 'GET':
+        rs=User.query.all()
+        return render_template_string(str([ str(user) for user in rs]))
 
-    return render_template_string(str([ str(user) for user in rs]))
+    name,password,phone_num,vcode = request.json.get('user_name'),request.json.get('password'),request.json.get('phone_num'),request.json.get('vcode')
 
-@bp.route("/get-verify-code", methods=["GET"])
+    if phone_num and vcode:
+        u = User.query.filter(User.phone_num==phone_num).first()
+        if u:
+            hascode = r.exists(vcode)
+            if hascode:
+                session_id = gen_session_id(phone_num)
+                resp = make_response(json.dumps(LOGIN_SUCCESS))
+                resp.set_cookie('bpetid', session_id)
+                return resp
+                #return render_template_string(str(json.dumps(LOGIN_SUCCESS)))
+
+    if name and password:
+        u = User.query.filter(User.user_name==name).first()
+        if u:
+            if password == u.password:
+                session_id = gen_session_id(name)
+                resp = make_response(json.dumps(LOGIN_SUCCESS))
+                resp.set_cookie('bpetid', session_id)
+                return resp
+                #return render_template_string(str(json.dumps(LOGIN_SUCCESS)))
+
+    return render_template_string(json.dumps(LOGIN_FAIL))
+
+
+@bp.route('/get-verify-code', methods=['GET'])
 def verify_code():
     #ip limitation
-    phone_number = request.args["phone_number"]
-    #send verify code to phone number
-    #save verify code in redis and set available time
-    pass
+    phone_number = request.args['phone_num']
+
+    code = str(random.randint(1000, 9999))
+    try:
+        if r.setex(code, 0, 300):
+            send_sms(code, phoneNumbers=phone_number)
+        else:
+            return render_template_string(json.dumps({"err_code":"1", "err_desc":"store code error"}))
+    except Exception as e:
+        return render_template_string(json.dumps({"err_code":"1", "err_desc":"sms error: " + e}))
+
+    return render_template_string(json.dumps(SMS_SUCCESS))
+
 
 @bp.route("/register", methods=["POST"])
 def register():
-    #if not session.get('logged_in'):
-    #    abort(401)
-    print(request.json)
-    u = User(request.json)
-    db_session.add(u)
-    db_session.commit()
+    try:
+        u = User(request.json)
+        u.save()
 
-    print("in register end")
-    #flash('New entry was successfully posted')
-    #return render_template_string(str({"test":"register"}))
-    return redirect(url_for('login.login'))
+        session_id = gen_session_id(u.user_name)
+        resp = make_response(json.dumps(LOGIN_SUCCESS))
+        resp.set_cookie('bpetid', session_id)
+    except Exception as e:
+        return render_template_string(json.dumps(REGISTER_FAIL))
+    return resp
 
