@@ -78,7 +78,7 @@ def register():
         db_session.commit()
 
         session_id = gen_session_id(u.user_name)
-        resp = make_response(json.dumps(LOGIN_SUCCESS))
+        resp = make_response(json.dumps(REGISTER_SUCCESS))
         resp.set_cookie('bpetid', session_id)
     except Exception as e:
         print(e)
